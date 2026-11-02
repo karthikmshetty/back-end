@@ -22,6 +22,10 @@ api-design/
         └── src/
             ├── entities/Product.ts
             ├── handlers/create.ts       # POST /products
+            ├── handlers/list.ts         # GET /products
+            ├── handlers/get.ts          # GET /products/{id}
+            ├── handlers/update.ts       # PUT /products/{id}
+            ├── handlers/delete.ts       # DELETE /products/{id}
             ├── handlers/upload-url.ts   # POST /products/upload-url
             ├── lib/{dynamodb,helper,s3}.ts
             └── utils/validators.ts
@@ -61,7 +65,10 @@ case-sensitive.
 | --- | --- | --- | --- |
 | POST | `/products` | `create` | Create a product |
 | GET | `/products` | `list` | Query parameters: `search`, `category`, `sort_order` (`asc`/`desc`, default `desc`), `page_number` (default 1), `page_size` (default 10, max 100). Returns `message`, `data`, `total_count`. |
-| POST | `/products/upload-url` | `upload-url` | Presigned S3 upload URL |
+| GET | `/products/{id}` | `get` | One product (GetItem on the full key). 404 if it doesn't exist. |
+| PUT | `/products/{id}` | `update` | Full replace with the same rules as create; optional fields left out are removed. Keeps `created_at`, sets `updated_at`. 404 if it doesn't exist. |
+| DELETE | `/products/{id}` | `delete` | Deletes the product (its files stay in S3). 404 if it doesn't exist. |
+| POST | `/products/upload-url` | `upload-url` | Presigned S3 upload URL for an image or a PDF brochure |
 
 ## SSM parameters
 
@@ -96,6 +103,10 @@ stay private.
    type gets 403 from S3.
 3. Send `file_url` in `images` when calling `POST /products`.
 
+Brochures use the same flow with `{ "content_type": "application/pdf" }`. They
+are stored under `products/brochures/` (still public) and the `file_url` goes in
+the product's `brochure` field.
+
 ## Errors
 
 Every handler is wrapped in try/catch and uses one shared error handler.
@@ -105,6 +116,7 @@ CloudWatch instead.
 | Status | When |
 | --- | --- |
 | 400 | Missing/non-JSON body, or validation failed |
+| 404 | `GET`/`PUT`/`DELETE /products/{id}` for an id that doesn't exist |
 | 409 | Duplicate id (create only) |
 | 429 | Throttled (also returned by API Gateway's own rate limit) |
 | 500 | Anything else |

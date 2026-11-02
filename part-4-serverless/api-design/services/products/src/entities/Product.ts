@@ -23,6 +23,8 @@ export interface Product {
   handle_with_care: boolean;
   /** Image URLs; the first one is the main image. */
   images: string[];
+  /** URL of the product brochure (PDF). */
+  brochure?: string;
   /** ISO date string. */
   created_at: string;
   /** ISO date string. */

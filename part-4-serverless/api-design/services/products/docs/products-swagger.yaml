@@ -3,12 +3,16 @@ info:
   title: Demo Application FDE – Products API
   version: 1.0.0
   description: |
-    Create products and upload product images.
+    Create, list, read, update and delete products, and upload product images
+    and brochures.
 
     Image upload flow:
     1. `POST /products/upload-url` with the file's content type.
     2. `PUT` the file bytes to `upload_url` with the same `Content-Type` header and no auth header.
     3. Send `file_url` in `images` when calling `POST /products`.
+
+    Brochures use the same flow with content type `application/pdf`; send the
+    `file_url` in `brochure`.
 
     Every response body has a `message`; successful responses also have `data`.
     API Gateway can itself answer 429 when its own rate limit is hit, before the
@@ -158,9 +162,102 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /products/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The product id (UUID) returned by create or list.
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get one product
+      operationId: getProduct
+      responses:
+        '200':
+          description: The product.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, data]
+                properties:
+                  message:
+                    type: string
+                    example: Product retrieved successfully
+                  data:
+                    $ref: '#/components/schemas/Product'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    put:
+      summary: Replace a product
+      operationId: updateProduct
+      description: |
+        Full replace with the same rules as create. Optional fields left out are
+        removed from the product. `id` and `created_at` never change; `updated_at`
+        is set to now.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '200':
+          description: Product updated; data is the product after the change.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, data]
+                properties:
+                  message:
+                    type: string
+                    example: Product updated successfully
+                  data:
+                    $ref: '#/components/schemas/Product'
+        '400':
+          description: Body is missing or not JSON, or fails validation (same messages as create).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Product name is required
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    delete:
+      summary: Delete a product
+      operationId: deleteProduct
+      description: Deletes the product record. Its images and brochure stay in S3.
+      responses:
+        '200':
+          description: Product deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Product deleted successfully
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
   /products/upload-url:
     post:
-      summary: Get a presigned URL to upload a product image
+      summary: Get a presigned URL to upload a product image or brochure
       operationId: createUploadUrl
       requestBody:
         required: true
@@ -193,7 +290,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                message: Content type must be image/jpeg, image/png or image/webp
+                message: Content type must be image/jpeg, image/png, image/webp or application/pdf
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -201,6 +298,14 @@ paths:
 
 components:
   responses:
+    NotFound:
+      description: No product with this id.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Product not found
     TooManyRequests:
       description: Throttled. Wait and retry.
       content:
@@ -287,6 +392,10 @@ components:
           items:
             type: string
             format: uri
+        brochure:
+          type: string
+          format: uri
+          description: URL of the product brochure (PDF), from upload-url ("Brochure must be a valid URL").
 
     Product:
       type: object
@@ -351,6 +460,9 @@ components:
           items:
             type: string
             format: uri
+        brochure:
+          type: string
+          format: uri
         created_at:
           type: string
           format: date-time
@@ -365,7 +477,8 @@ components:
       properties:
         content_type:
           type: string
-          enum: [image/jpeg, image/png, image/webp]
+          enum: [image/jpeg, image/png, image/webp, application/pdf]
+          description: Images go under products/, PDFs (brochures) under products/brochures/.
 
     UploadUrl:
       type: object
@@ -378,7 +491,7 @@ components:
         file_url:
           type: string
           format: uri
-          description: Public URL of the image once uploaded; send it in `images`.
+          description: Public URL of the file once uploaded; send it in `images` (or `brochure` for a PDF).
         key:
           type: string
           example: products/0b6f6c1e-2f43-4c4e-9a43-5a2d3c1f9e10.jpg

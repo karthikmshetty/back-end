@@ -13,8 +13,11 @@ export const IMAGES_BUCKET = process.env.IMAGES_BUCKET as string;
 
 export const REGION = process.env.AWS_REGION ?? 'ap-south-1';
 
-/** Every product image lives under this prefix (the only public one). */
+/** Every product file lives under this prefix (the only public one). */
 export const IMAGE_KEY_PREFIX = 'products/';
+
+/** Brochures sit inside the public prefix too, so their URLs open in the browser. */
+export const BROCHURE_KEY_PREFIX = 'products/brochures/';
 
 /** How long a presigned upload URL stays valid, in seconds. */
 export const UPLOAD_URL_EXPIRES_IN = 300;

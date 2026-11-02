@@ -72,3 +72,22 @@ export const handleError = (
     message: 'Oops! Something went wrong. Please try again later.',
   });
 };
+
+/** The `{id}` path parameter of /products/{id}, or undefined if it's missing or blank. */
+export const getProductId = (
+  pathParameters: Record<string, string | undefined> | null,
+): string | undefined => {
+  const id = pathParameters?.id?.trim();
+  return id ? id : undefined;
+};
+
+export const productNotFound = (): APIGatewayProxyResult =>
+  buildResponse(404, { message: 'Product not found' });
+
+/**
+ * True when a DynamoDB ConditionExpression failed. For update and delete the
+ * condition is "the product exists", so the caller answers 404.
+ */
+export const isConditionFailed = (error: unknown): boolean =>
+  (error as { name?: unknown } | null)?.name ===
+  'ConditionalCheckFailedException';

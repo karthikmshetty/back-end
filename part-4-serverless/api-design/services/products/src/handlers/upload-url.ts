@@ -4,6 +4,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { buildResponse, handleError, parseBody } from '../lib/helper';
 import {
+  BROCHURE_KEY_PREFIX,
   getPublicUrl,
   IMAGE_KEY_PREFIX,
   IMAGES_BUCKET,
@@ -26,7 +27,11 @@ export const handler = async (
 
     const { content_type } = uploadUrlSchema.parse(body);
 
-    const key = `${IMAGE_KEY_PREFIX}${randomUUID()}.${CONTENT_TYPE_EXTENSIONS[content_type]}`;
+    const prefix =
+      content_type === 'application/pdf'
+        ? BROCHURE_KEY_PREFIX
+        : IMAGE_KEY_PREFIX;
+    const key = `${prefix}${randomUUID()}.${CONTENT_TYPE_EXTENSIONS[content_type]}`;
 
     // Sign content-type too (by default only host is signed), so S3 answers
     // 403 to a PUT whose Content-Type differs from the one requested here.

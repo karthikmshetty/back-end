@@ -31,12 +31,16 @@ provider:
           Action:
             - dynamodb:PutItem
             - dynamodb:Query
+            - dynamodb:GetItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
           # Querying a local secondary index needs the index ARN as well.
           Resource:
             - ${self:custom.tableArn}
             - ${self:custom.tableArn}/index/*
         # A presigned URL carries the permissions of the role that signed it,
         # so upload-url needs PutObject for the browser's upload to succeed.
+        # Brochures go under products/brochures/, which this also covers.
         - Effect: Allow
           Action:
             - s3:PutObject
@@ -84,4 +88,25 @@ functions:
       - http:
           path: /products/upload-url
           method: post
+          cors: true
+  get:
+    handler: dist/handlers/get.handler
+    events:
+      - http:
+          path: /products/{id}
+          method: get
+          cors: true
+  update:
+    handler: dist/handlers/update.handler
+    events:
+      - http:
+          path: /products/{id}
+          method: put
+          cors: true
+  delete:
+    handler: dist/handlers/delete.handler
+    events:
+      - http:
+          path: /products/{id}
+          method: delete
           cors: true
