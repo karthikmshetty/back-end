@@ -1,0 +1,10 @@
+// Compiles this service's src/ into dist/ (the root config only type-checks).
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"]
+}

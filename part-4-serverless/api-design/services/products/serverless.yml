@@ -1,0 +1,87 @@
+# Products API. Needs the "resources" stack deployed first: the table, bucket
+# and layer it uses are all read from SSM parameters that stack creates.
+service: products
+
+frameworkVersion: '3'
+
+plugins:
+  - serverless-offline
+  - serverless-plugin-scripts
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  region: ap-south-1
+  stage: ${opt:stage, 'staging'}
+  memorySize: 128
+  timeout: 10
+  versionFunctions: false
+  # Runtime libraries (S3 client, presigner, zod) come from the shared layer.
+  layers:
+    - ${ssm:/${sls:stage}/lambda/node-layer-arn}
+  environment:
+    STAGE: ${sls:stage}
+    TABLE_NAME: ${self:custom.tableName}
+    IMAGES_BUCKET: ${self:custom.imagesBucket}
+  iam:
+    role:
+      # Least privilege: only what the handlers below actually call.
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:Query
+          # Querying a local secondary index needs the index ARN as well.
+          Resource:
+            - ${self:custom.tableArn}
+            - ${self:custom.tableArn}/index/*
+        # A presigned URL carries the permissions of the role that signed it,
+        # so upload-url needs PutObject for the browser's upload to succeed.
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+          Resource: arn:aws:s3:::${self:custom.imagesBucket}/products/*
+
+custom:
+  tableName: ${ssm:/${sls:stage}/dynamodb/products-table-name}
+  imagesBucket: ${ssm:/${sls:stage}/s3/product-images-bucket-name}
+  tableArn: arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${self:custom.tableName}
+  scripts:
+    hooks:
+      # Compile TypeScript with plain tsc before anything is packaged or run.
+      'before:package:createDeploymentArtifacts': rm -rf dist && npx tsc -p tsconfig.json
+      'before:offline:start:init': rm -rf dist && npx tsc -p tsconfig.json
+      'before:deploy:function:packageFunction': rm -rf dist && npx tsc -p tsconfig.json
+
+package:
+  patterns:
+    - '!**'
+    - 'dist/**'
+    - '!node_modules/**'
+    - '!src/**'
+    - '!docs/**'
+    - '!**/*.ts'
+    - '!tsconfig.json'
+
+functions:
+  create:
+    handler: dist/handlers/create.handler
+    events:
+      - http:
+          path: /products
+          method: post
+          cors: true
+  list:
+    handler: dist/handlers/list.handler
+    events:
+      - http:
+          path: /products
+          method: get
+          cors: true
+  upload-url:
+    handler: dist/handlers/upload-url.handler
+    events:
+      - http:
+          path: /products/upload-url
+          method: post
+          cors: true

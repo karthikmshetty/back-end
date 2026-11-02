@@ -1,0 +1,20 @@
+// Shared base config. `npm run typecheck` uses it to type-check every service
+// without writing any files. Each service's own tsconfig extends this one and
+// turns emitting back on to compile its src/ into dist/.
+{
+  "compilerOptions": {
+    // Node 22 supports ES2022.
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    // No "type": "module" in package.json, so "nodenext" emits CommonJS for Lambda.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    // Type definitions to load, e.g. so `APIGatewayProxyEvent` is known.
+    "types": ["node", "aws-lambda"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["services/*/src/**/*.ts"]
+}

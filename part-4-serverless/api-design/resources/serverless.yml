@@ -1,0 +1,128 @@
+# Long-lived AWS resources shared by every service. Deploy this stack first.
+# It is separate from the services so that removing a service never deletes data.
+service: resources
+
+frameworkVersion: '3'
+
+plugins:
+  - serverless-plugin-scripts
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  region: ap-south-1
+  stage: ${opt:stage, 'staging'}
+
+custom:
+  scripts:
+    hooks:
+      # Install the layer's runtime libraries before the layer is zipped.
+      'before:package:createDeploymentArtifacts': cd layer/nodejs && npm install --omit=dev
+
+layers:
+  # Serverless names the CloudFormation resource "NodeDependenciesLambdaLayer".
+  NodeDependencies:
+    path: layer
+    description: Common Node.js dependencies
+    compatibleRuntimes:
+      - nodejs22.x
+    package:
+      patterns:
+        - '!nodejs/package.json'
+        - '!nodejs/package-lock.json'
+
+resources:
+  Resources:
+    ProductsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: products-${sls:stage}
+        BillingMode: PAY_PER_REQUEST
+        PointInTimeRecoverySpecification:
+          PointInTimeRecoveryEnabled: true
+        AttributeDefinitions:
+          - AttributeName: item_code
+            AttributeType: S
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: created_at
+            AttributeType: S
+        # Every product has item_code "product", so one Query returns them all (no Scan).
+        KeySchema:
+          - AttributeName: item_code
+            KeyType: HASH
+          - AttributeName: id
+            KeyType: RANGE
+        # Same partition, sorted by date; used to list products newest/oldest first.
+        LocalSecondaryIndexes:
+          - IndexName: created_at-index
+            KeySchema:
+              - AttributeName: item_code
+                KeyType: HASH
+              - AttributeName: created_at
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    ProductImagesBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        # Bucket names are global, so the account ID keeps this one unique.
+        BucketName: product-images-${sls:stage}-${aws:accountId}
+        # ACLs stay blocked; only the bucket policy below makes objects public.
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          IgnorePublicAcls: true
+          BlockPublicPolicy: false
+          RestrictPublicBuckets: false
+        # Lets the browser PUT the file straight to the presigned URL.
+        CorsConfiguration:
+          CorsRules:
+            - AllowedMethods:
+                - PUT
+                - GET
+              AllowedOrigins:
+                - '*'
+              AllowedHeaders:
+                - '*'
+              MaxAge: 3000
+
+    ProductImagesBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref ProductImagesBucket
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            # Anyone can read images under products/ (so <img> tags work);
+            # listing the bucket and uploading stay private.
+            - Sid: PublicReadProductImages
+              Effect: Allow
+              Principal: '*'
+              Action: s3:GetObject
+              Resource: !Join ['', [!GetAtt ProductImagesBucket.Arn, '/products/*']]
+
+    # Services read these instead of hard-coding names.
+    ProductsTableNameParameter:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /${sls:stage}/dynamodb/products-table-name
+        Type: String
+        Value: !Ref ProductsTable
+        Description: DynamoDB table name for products
+
+    NodeLayerArnParameter:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /${sls:stage}/lambda/node-layer-arn
+        Type: String
+        Value: !Ref NodeDependenciesLambdaLayer
+        Description: ARN of the shared Node.js dependencies Lambda layer
+
+    ProductImagesBucketNameParameter:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /${sls:stage}/s3/product-images-bucket-name
+        Type: String
+        Value: !Ref ProductImagesBucket
+        Description: S3 bucket name for product images

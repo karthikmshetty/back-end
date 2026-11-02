@@ -1,0 +1,388 @@
+openapi: 3.0.3
+info:
+  title: Demo Application FDE – Products API
+  version: 1.0.0
+  description: |
+    Create products and upload product images.
+
+    Image upload flow:
+    1. `POST /products/upload-url` with the file's content type.
+    2. `PUT` the file bytes to `upload_url` with the same `Content-Type` header and no auth header.
+    3. Send `file_url` in `images` when calling `POST /products`.
+
+    Every response body has a `message`; successful responses also have `data`.
+    API Gateway can itself answer 429 when its own rate limit is hit, before the
+    Lambda runs. Treat it like the 429 documented below: wait and retry.
+servers:
+  - url: https://{apiId}.execute-api.ap-south-1.amazonaws.com/staging
+    description: Deployed API Gateway (staging)
+    variables:
+      apiId:
+        default: your-api-id
+        description: REST API ID printed by `npm run deploy:products`
+  - url: http://localhost:3000/staging
+    description: serverless-offline
+
+paths:
+  /products:
+    get:
+      summary: List products, newest first
+      operationId: listProducts
+      description: |
+        Reads with a Query on the created_at local secondary index (never a Scan).
+        Unknown query parameters are rejected with 400.
+      parameters:
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive search in the product name (trimmed and lowercased).
+          schema:
+            type: string
+        - name: category
+          in: query
+          required: false
+          description: Exact category match (trimmed).
+          schema:
+            type: string
+        - name: sort_order
+          in: query
+          required: false
+          description: Sort by created date. Otherwise "Sort order must be 'asc' or 'desc'".
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: page_number
+          in: query
+          required: false
+          description: Page to return, counting from 1. Otherwise "Page number must be a positive integer".
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          description: Products per page. Otherwise "Page size must be between 1 and 100".
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: |
+            One page of matching products. When nothing matches, message is
+            "No results found", data is empty and total_count is 0.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, data, total_count]
+                properties:
+                  message:
+                    type: string
+                    example: Products retrieved successfully
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Product'
+                  total_count:
+                    type: integer
+                    description: Number of matching products before paging.
+                    example: 42
+        '400':
+          description: Invalid query string (the first validation message).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Page size must be between 1 and 100
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      summary: Create a product
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+            example:
+              name: Organic Hand Soap
+              category: Personal Care
+              rate_per_unit: 120
+              uom: piece
+              eco_friendly: true
+              images:
+                - https://product-images-staging-123456789012.s3.ap-south-1.amazonaws.com/products/0b6f6c1e-2f43-4c4e-9a43-5a2d3c1f9e10.jpg
+      responses:
+        '201':
+          description: Product created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, data]
+                properties:
+                  message:
+                    type: string
+                    example: Product added successfully
+                  data:
+                    $ref: '#/components/schemas/Product'
+        '400':
+          description: |
+            Body is missing or not JSON ("Request body must be valid JSON"), or
+            fails validation (the first validation message, e.g. "Product name is required"
+            or "Unrecognized key(s) in object: 'foo'").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Product name is required
+        '409':
+          description: The generated id already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: This record already exists. Please try again.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /products/upload-url:
+    post:
+      summary: Get a presigned URL to upload a product image
+      operationId: createUploadUrl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+            example:
+              content_type: image/jpeg
+      responses:
+        '200':
+          description: Upload URL created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, data]
+                properties:
+                  message:
+                    type: string
+                    example: Upload URL created successfully
+                  data:
+                    $ref: '#/components/schemas/UploadUrl'
+        '400':
+          description: |
+            Body is missing or not JSON ("Request body must be valid JSON"), or the
+            content type is not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Content type must be image/jpeg, image/png or image/webp
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+components:
+  responses:
+    TooManyRequests:
+      description: Throttled. Wait and retry.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Too many requests. Please try again in a moment.
+    ServerError:
+      description: Any other failure. Details are only logged, never returned.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Oops! Something went wrong. Please try again later.
+
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+      additionalProperties: false
+
+    CreateProductRequest:
+      type: object
+      additionalProperties: false
+      description: Unknown fields are rejected. String fields are trimmed.
+      required: [name, category, rate_per_unit]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Required ("Product name is required"); at most 100 characters ("Product name must be at most 100 characters").
+        category:
+          type: string
+          minLength: 1
+          description: Required ("Category is required").
+        rate_per_unit:
+          type: number
+          minimum: 0
+          description: Required ("Rate per unit is required", "Rate per unit must be a number", "Rate per unit must be 0 or more").
+        description:
+          type: string
+          maxLength: 1000
+          description: At most 1000 characters ("Description must be at most 1000 characters").
+        form:
+          type: string
+        safety:
+          type: string
+        uom:
+          type: string
+          description: Unit of measure.
+        product_type:
+          type: string
+        product_size:
+          type: string
+        product_variant:
+          type: string
+        product_color:
+          type: string
+        market_selling_price:
+          type: number
+          minimum: 0
+          description: '"Market selling price must be a number", "Market selling price must be 0 or more".'
+        sale_profit_margin:
+          type: number
+          minimum: 0
+          description: '"Sale profit margin must be a number", "Sale profit margin must be 0 or more".'
+        eco_friendly:
+          type: boolean
+          default: false
+        handle_with_care:
+          type: boolean
+          default: false
+        images:
+          type: array
+          maxItems: 5
+          default: []
+          description: At most 5 ("At most 5 images are allowed"); each a valid URL ("Each image must be a valid URL"). The first is the main image.
+          items:
+            type: string
+            format: uri
+
+    Product:
+      type: object
+      required:
+        [
+          item_code,
+          id,
+          name,
+          name_lowercase,
+          category,
+          rate_per_unit,
+          eco_friendly,
+          handle_with_care,
+          images,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        item_code:
+          type: string
+          enum: [product]
+          description: Partition key; always "product".
+        id:
+          type: string
+          format: uuid
+          description: Sort key.
+        name:
+          type: string
+        name_lowercase:
+          type: string
+          description: Lowercase copy of name, used for case-insensitive search.
+        category:
+          type: string
+        rate_per_unit:
+          type: number
+        description:
+          type: string
+        form:
+          type: string
+        safety:
+          type: string
+        uom:
+          type: string
+        product_type:
+          type: string
+        product_size:
+          type: string
+        product_variant:
+          type: string
+        product_color:
+          type: string
+        market_selling_price:
+          type: number
+        sale_profit_margin:
+          type: number
+        eco_friendly:
+          type: boolean
+        handle_with_care:
+          type: boolean
+        images:
+          type: array
+          items:
+            type: string
+            format: uri
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UploadUrlRequest:
+      type: object
+      additionalProperties: false
+      required: [content_type]
+      properties:
+        content_type:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+
+    UploadUrl:
+      type: object
+      required: [upload_url, file_url, key, expires_in]
+      properties:
+        upload_url:
+          type: string
+          format: uri
+          description: Presigned S3 PUT URL. Send the file with the same Content-Type; a different one gets 403 from S3.
+        file_url:
+          type: string
+          format: uri
+          description: Public URL of the image once uploaded; send it in `images`.
+        key:
+          type: string
+          example: products/0b6f6c1e-2f43-4c4e-9a43-5a2d3c1f9e10.jpg
+        expires_in:
+          type: integer
+          example: 300
+          description: Seconds until upload_url expires.
