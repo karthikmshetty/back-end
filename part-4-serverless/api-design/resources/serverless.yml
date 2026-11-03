@@ -102,6 +102,42 @@ resources:
               Action: s3:GetObject
               Resource: !Join ['', [!GetAtt ProductImagesBucket.Arn, '/products/*']]
 
+    # App users. Only admins create them (no self sign-up); users log in with username + password.
+    UserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: users-${sls:stage}
+        UsernameConfiguration:
+          CaseSensitive: false
+        AdminCreateUserConfig:
+          AllowAdminCreateUserOnly: true
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 8
+            RequireLowercase: true
+            RequireUppercase: true
+            RequireNumbers: true
+            RequireSymbols: false
+        AccountRecoverySetting:
+          RecoveryMechanisms:
+            - Name: admin_only
+              Priority: 1
+
+    # The front-end (Amplify) logs in with SRP, so the password itself is never sent.
+    # Browser apps cannot keep a secret, so the client has none.
+    UserPoolWebClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: web-${sls:stage}
+        UserPoolId: !Ref UserPool
+        GenerateSecret: false
+        ExplicitAuthFlows:
+          - ALLOW_USER_SRP_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+        # Unknown usernames get the same error as wrong passwords, so they cannot be guessed.
+        PreventUserExistenceErrors: ENABLED
+        EnableTokenRevocation: true
+
     # Services read these instead of hard-coding names.
     ProductsTableNameParameter:
       Type: AWS::SSM::Parameter
@@ -126,3 +162,26 @@ resources:
         Type: String
         Value: !Ref ProductImagesBucket
         Description: S3 bucket name for product images
+
+    UserPoolIdParameter:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /${sls:stage}/cognito/user-pool-id
+        Type: String
+        Value: !Ref UserPool
+        Description: Cognito user pool ID
+
+    UserPoolWebClientIdParameter:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /${sls:stage}/cognito/web-client-id
+        Type: String
+        Value: !Ref UserPoolWebClient
+        Description: Cognito app client ID used by the web front-end
+
+  # Printed after deploy; the front-end needs both in .env.local.
+  Outputs:
+    UserPoolId:
+      Value: !Ref UserPool
+    UserPoolWebClientId:
+      Value: !Ref UserPoolWebClient

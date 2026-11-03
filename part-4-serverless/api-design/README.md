@@ -79,9 +79,31 @@ The resources stack publishes names and ARNs so services never hard-code them:
 | `/<stage>/dynamodb/products-table-name` | DynamoDB table name |
 | `/<stage>/lambda/node-layer-arn` | Layer version ARN |
 | `/<stage>/s3/product-images-bucket-name` | Images bucket name |
+| `/<stage>/cognito/user-pool-id` | Cognito user pool ID |
+| `/<stage>/cognito/web-client-id` | Cognito app client ID (web front-end) |
 
 The products service reads them and passes `STAGE`, `TABLE_NAME` and
 `IMAGES_BUCKET` to its Lambdas.
+
+## Users (Cognito)
+
+The resources stack also creates the `users-<stage>` user pool and a `web-<stage>`
+app client. The front-end logs in with Amplify (SRP, username + password). There
+is no self sign-up: an admin creates each user. `admin-set-user-password
+--permanent` skips the "change your temporary password" step, so the user can
+log in straight away.
+
+```bash
+POOL=$(aws ssm get-parameter --name /staging/cognito/user-pool-id --query Parameter.Value --output text)
+aws cognito-idp admin-create-user --user-pool-id "$POOL" --username asha \
+  --user-attributes Name=given_name,Value=Asha Name=family_name,Value=Rao \
+  --message-action SUPPRESS
+aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username asha \
+  --password 'Choose-A-Password1' --permanent
+```
+
+Passwords need at least 8 characters with an upper-case letter, a lower-case
+letter and a number. The products API does not check the login yet.
 
 ## Lambda layer
 
@@ -130,7 +152,7 @@ to `staging`; region is `ap-south-1`.
 
 ```bash
 npm install
-npm run deploy:resources   # first: table, bucket, layer, SSM parameters
+npm run deploy:resources   # first: table, bucket, user pool, layer, SSM parameters
 npm run deploy:products    # then: the API
 ```
 
